@@ -154,7 +154,7 @@ const updateStockForReceipt = async ({ businessId, productId, receivedBy, receip
       createdBy: receivedBy,
     }));
 
-  if (movements.length > 0) await StockMovement.create(movements, { session });
+  if (movements.length > 0) await StockMovement.create(movements, { session, ordered: true });
 };
 
 export const createRefillRate = async ({
@@ -338,7 +338,7 @@ export const dispatchRefillBatch = async ({
           createdBy: actorId,
         }));
       }
-      await StockMovement.create(dispatchMovements, { session });
+      await StockMovement.create(dispatchMovements, { session, ordered: true });
       return batch;
     },
   });
@@ -453,7 +453,7 @@ export const recordRefillReceipt = async ({
           note,
           receivedBy: actorId,
         }],
-        { session },
+        { session, ordered: true },
       );
 
       for (const item of receipt.items) {
@@ -599,7 +599,7 @@ export const resolveRefillIssue = async ({
           note: 'Returned to the supplier.',
           createdBy: actorId,
         })];
-        await StockMovement.create(movements, { session });
+        await StockMovement.create(movements, { session, ordered: true });
       }
 
       const resolution = new RefillIssueResolution({
@@ -708,7 +708,7 @@ export const recordReplacementReceipt = async ({
         receivedAt: receivedDate,
         receivedBy: actorId,
         note,
-      }], { session });
+      }], { session, ordered: true });
 
       await StockMovement.create([
         addStockMovement({
@@ -733,7 +733,7 @@ export const recordReplacementReceipt = async ({
           note: 'Replacement full cylinder physically received.',
           createdBy: actorId,
         }),
-      ], { session });
+      ], { session, ordered: true });
       return replacementReceipt;
     },
   });

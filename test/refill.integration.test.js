@@ -1,28 +1,44 @@
 import assert from 'node:assert/strict';
 import { after, afterEach, before, beforeEach, test } from 'node:test';
-import Stock from '../src/modules/stock.model.js';
-import RefillBatch from '../src/modules/refill-batch.model.js';
-import RefillIssueResolution from '../src/modules/refill-issue-resolution.model.js';
-import RefillReceipt from '../src/modules/refill-receipt.model.js';
-import RefillReplacementReceipt from '../src/modules/refill-replacement-receipt.model.js';
-import SupplierPayment from '../src/modules/supplier-payment.model.js';
-import {
-  createRefillRate,
-  dispatchRefillBatch,
-  getSupplierAccountSummary,
-  recordRefillReceipt,
-  recordReplacementReceipt,
-  recordSupplierPayment,
-  resolveRefillIssue,
-} from '../src/modules/refill.service.js';
-import { cleanupRefillFixture, createRefillFixture } from './support/refill-fixtures.js';
 import { assertTestDatabaseIsEmpty, connectTestDatabase, disconnectTestDatabase } from './support/test-database.js';
 
 let fixture;
+let Stock;
+let RefillBatch;
+let RefillIssueResolution;
+let RefillReceipt;
+let RefillReplacementReceipt;
+let SupplierPayment;
+let createRefillRate;
+let dispatchRefillBatch;
+let getSupplierAccountSummary;
+let recordRefillReceipt;
+let recordReplacementReceipt;
+let recordSupplierPayment;
+let resolveRefillIssue;
+let cleanupRefillFixture;
+let createRefillFixture;
 
 before(async () => {
   await connectTestDatabase();
   await assertTestDatabaseIsEmpty();
+
+  // Defer model imports until the pre-connection emptiness check has passed.
+  const [models, refillService, refillFixtures] = await Promise.all([
+    Promise.all([
+      import('../src/modules/stock.model.js'),
+      import('../src/modules/refill-batch.model.js'),
+      import('../src/modules/refill-issue-resolution.model.js'),
+      import('../src/modules/refill-receipt.model.js'),
+      import('../src/modules/refill-replacement-receipt.model.js'),
+      import('../src/modules/supplier-payment.model.js'),
+    ]),
+    import('../src/modules/refill.service.js'),
+    import('./support/refill-fixtures.js'),
+  ]);
+  [Stock, RefillBatch, RefillIssueResolution, RefillReceipt, RefillReplacementReceipt, SupplierPayment] = models.map((model) => model.default);
+  ({ createRefillRate, dispatchRefillBatch, getSupplierAccountSummary, recordRefillReceipt, recordReplacementReceipt, recordSupplierPayment, resolveRefillIssue } = refillService);
+  ({ cleanupRefillFixture, createRefillFixture } = refillFixtures);
 });
 
 beforeEach(async () => {
