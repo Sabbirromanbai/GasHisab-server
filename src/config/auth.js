@@ -1,0 +1,98 @@
+import { betterAuth } from 'better-auth';
+import { mongodbAdapter } from '@better-auth/mongo-adapter';
+import mongoose from 'mongoose';
+
+const parseOrigin = (value, name) => {
+  let url;
+  try { url = new URL(value); } catch { throw new Error(`${name} must be a valid origin URL.`); }
+  if (!['http:', 'https:'].includes(url.protocol) || url.origin !== value || url.username || url.password) {
+    throw new Error(`${name} must be an exact HTTP(S) origin without a path or credentials.`);
+  }
+  return url.origin;
+};
+
+export const createAuthConfig = (env = process.env) => {
+  const secret = env.BETTER_AUTH_SECRET?.trim();
+  if (!secret || Buffer.byteLength(secret) < 32) throw new Error('BETTER_AUTH_SECRET must contain at least 32 bytes.');
+  const baseURL = parseOrigin(env.BETTER_AUTH_URL?.trim() ?? '', 'BETTER_AUTH_URL');
+  const allowedOrigins = (env.AUTH_ALLOWED_ORIGINS ?? baseURL).split(',').map((item) => parseOrigin(item.trim(), 'AUTH_ALLOWED_ORIGINS'));
+  if (!allowedOrigins.includes(baseURL)) throw new Error('AUTH_ALLOWED_ORIGINS must include BETTER_AUTH_URL.');
+  const production = env.NODE_ENV === 'production';
+  if (production && new URL(baseURL).protocol !== 'https:') {
+    throw new Error('BETTER_AUTH_URL must use HTTPS in production.');
+  }
+  const environment = env.NODE_ENV ?? 'development';
+  const trustedProxyHops = Number(env.TRUST_PROXY_HOPS ?? 0);
+  if (!Number.isInteger(trustedProxyHops) || trustedProxyHops < 0 || trustedProxyHops > 5) {
+    throw new Error('TRUST_PROXY_HOPS must be an integer between 0 and 5.');
+  }
+  return {
+    secret,
+    baseURL,
+    allowedOrigins,
+    production,
+    environment,
+    trustedProxyHops,
+    // Production supports a separately hosted Next.js origin; Secure is also required below.
+    cookieSameSite: production ? 'none' : 'lax',
+  };
+};
+
+export const createBetterAuth = ({ db, mongoClient, config }) => {
+  const expectedDatabase = config?.environment === 'test' ? 'gashisab_test' : 'gashisab';
+  if (!db || db.databaseName !== expectedDatabase || !mongoClient || !config) {
+    throw new Error('Better Auth must use gashisab at runtime and gashisab_test only in tests.');
+  }
+  return betterAuth({
+    appName: 'GasHisab',
+    baseURL: config.baseURL,
+    secret: config.secret,
+    trustedOrigins: config.allowedOrigins,
+    database: mongodbAdapter(db, { client: mongoClient }),
+    user: {
+      modelName: 'users',
+      additionalFields: {
+        status: { type: 'string', required: true, defaultValue: 'active', input: false },
+      },
+    },
+    emailAndPassword: {
+      enabled: true,
+      disableSignUp: true,
+      minPasswordLength: 12,
+      maxPasswordLength: 128,
+    },
+    session: { expiresIn: 60 * 60 * 24 * 7, updateAge: 60 * 60 * 24 },
+    databaseHooks: {
+      session: {
+        create: {
+          // Prevent suspended accounts from receiving new sessions, in addition to API checks.
+          before: async (session) => {
+            if (!mongoose.isValidObjectId(session.userId)) return false;
+            const activeUser = await db.collection('users').findOne({
+              _id: new mongoose.Types.ObjectId(session.userId),
+              status: 'active',
+            }, { projection: { _id: 1 } });
+            return activeUser ? undefined : false;
+          },
+        },
+      },
+    },
+    rateLimit: {
+      enabled: true,
+      storage: 'database',
+      customRules: { '/sign-in/email': { window: 60, max: 10 } },
+    },
+    advanced: {
+      useSecureCookies: config.production,
+      disableCSRFCheck: false,
+      disableOriginCheck: false,
+      ipAddress: { ipAddressHeaders: ['x-gashisab-client-ip'] },
+      defaultCookieAttributes: {
+        httpOnly: true,
+        secure: config.production,
+        sameSite: config.cookieSameSite,
+        path: '/',
+      },
+    },
+  });
+};

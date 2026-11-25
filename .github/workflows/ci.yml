@@ -66,7 +66,7 @@ jobs:
           echo "MongoDB replica set did not become primary in time." >&2
           exit 1
 
-      - name: Run refill integration tests
+      - name: Run refill and auth integration tests
         env:
           MONGODB_TEST_URI: mongodb://127.0.0.1:27018/gashisab_test?replicaSet=gashisab-rs
-        run: npm run test:refill
+        run: npm run test:refill && npm run test:auth

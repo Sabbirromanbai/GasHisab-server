@@ -12,14 +12,15 @@ const userSchema = new mongoose.Schema(
       maxlength: 254,
       match: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
     },
-    // Keep stored hashes out of ordinary query results; authentication is added separately.
-    passwordHash: { type: String, required: true, minlength: 1, select: false },
     status: {
       type: String,
       enum: ['active', 'suspended'],
       default: 'active',
       required: true,
     },
+    // These fields are written by Better Auth into this same users collection.
+    emailVerified: { type: Boolean, default: false },
+    image: { type: String, default: null },
   },
   { timestamps: true },
 );

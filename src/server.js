@@ -1,7 +1,8 @@
 // Load .env before startup validation reads process.env.
 import 'dotenv/config';
 import mongoose from 'mongoose';
-import app from './app.js';
+import { createApp } from './app.js';
+import { createAuthConfig, createBetterAuth } from './config/auth.js';
 import { connectDB } from './config/db.js';
 
 const validateEnvironment = () => {
@@ -21,16 +22,21 @@ const validateEnvironment = () => {
     throw new Error('MONGODB_URI is required.');
   }
 
-  return { port, mongoUri };
+  const authConfig = createAuthConfig(process.env);
+  return { port, mongoUri, authConfig };
 };
 
 const startServer = async () => {
   try {
-    const { port, mongoUri } = validateEnvironment();
+    const { port, mongoUri, authConfig } = validateEnvironment();
     // Keep the HTTP server closed until MongoDB is ready.
     await connectDB(mongoUri);
     console.log('Connected to MongoDB');
 
+    // Share Mongoose's client and explicitly bind auth storage to the runtime database.
+    const mongoClient = mongoose.connection.getClient();
+    const auth = createBetterAuth({ db: mongoClient.db('gashisab'), mongoClient, config: authConfig });
+    const app = createApp({ auth, config: authConfig });
     const server = app.listen(port, () => {
       console.log(`GasHisab server listening on port ${port}`);
     });

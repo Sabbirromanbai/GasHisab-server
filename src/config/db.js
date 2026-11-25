@@ -20,8 +20,9 @@ export const connectDB = (uri = process.env.MONGODB_URI) => {
     return Promise.reject(new Error('MONGODB_URI is required.'));
   }
 
+  // Never let a deployment URI's default/path database redirect runtime writes.
   connectionPromise = mongoose
-    .connect(uri.trim())
+    .connect(uri.trim(), { dbName: 'gashisab' })
     .then(() => mongoose.connection)
     .finally(() => {
       connectionPromise = undefined;
