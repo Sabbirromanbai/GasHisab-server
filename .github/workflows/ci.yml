@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  refill-integration:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Check JavaScript syntax
+        run: find src test -type f -name '*.js' -print0 | xargs -0 -r -n1 node --check
+
+      - name: Start isolated MongoDB
+        run: >-
+          docker run --detach --rm --name gashisab-mongodb
+          --publish 127.0.0.1:27018:27018 mongo:8.0.38-noble
+          mongod --replSet gashisab-rs --bind_ip_all --port 27018
+
+      - name: Initialize MongoDB replica set
+        run: |
+          ready=false
+          for attempt in $(seq 1 30); do
+            if docker exec gashisab-mongodb mongosh --host 127.0.0.1 --port 27018 --quiet --eval \
+              'db.adminCommand("ping").ok'; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" != true ]; then
+            echo "MongoDB did not become available in time." >&2
+            exit 1
+          fi
+
+          docker exec gashisab-mongodb mongosh --host 127.0.0.1 --port 27018 --quiet --eval \
+            'rs.initiate({_id: "gashisab-rs", members: [{_id: 0, host: "127.0.0.1:27018"}]})'
+
+          for attempt in $(seq 1 30); do
+            if docker exec gashisab-mongodb mongosh --host 127.0.0.1 --port 27018 --quiet --eval \
+              'quit(rs.status().myState === 1 ? 0 : 1)'; then
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "MongoDB replica set did not become primary in time." >&2
+          exit 1
+
+      - name: Run refill integration tests
+        env:
+          MONGODB_TEST_URI: mongodb://127.0.0.1:27018/gashisab_test?replicaSet=gashisab-rs
+        run: npm run test:refill
