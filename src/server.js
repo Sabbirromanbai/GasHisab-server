@@ -41,6 +41,23 @@ const startServer = async () => {
       console.log(`GasHisab server listening on port ${port}`);
     });
 
+    // Let in-flight refill transactions finish before a deploy or restart drops the process.
+    let shuttingDown = false;
+    const shutdown = (signal) => {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      console.log(`Received ${signal}; closing GasHisab server.`);
+      server.closeIdleConnections?.();
+      server.close(async () => {
+        await mongoose.disconnect().catch(() => {});
+        process.exit(0);
+      });
+      // Never hold the platform's shutdown window open indefinitely.
+      setTimeout(() => process.exit(1), 10_000).unref();
+    };
+    process.once('SIGTERM', () => shutdown('SIGTERM'));
+    process.once('SIGINT', () => shutdown('SIGINT'));
+
     server.once('error', async (error) => {
       console.error(`Failed to start GasHisab server (${error.code ?? error.name}).`);
       await mongoose.disconnect().catch(() => {});
