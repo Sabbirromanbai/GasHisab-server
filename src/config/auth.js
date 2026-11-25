@@ -67,6 +67,9 @@ export const createBetterAuth = ({ db, mongoClient, config }) => {
       modelName: 'users',
       additionalFields: {
         status: { type: 'string', required: true, defaultValue: 'active', input: false },
+        // Platform-level role. input: false prevents clients from self-assigning
+        // platform privileges via HTTP. Default 'none' ensures no accidental elevation.
+        platformRole: { type: 'string', required: true, defaultValue: 'none', input: false },
       },
     },
     emailAndPassword: {

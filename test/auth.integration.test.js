@@ -22,6 +22,7 @@ let auth;
 let requireAuthentication;
 let requireRole;
 let requireTenant;
+let requirePlatformAdmin;
 
 before(async () => {
   await connectTestDatabase();
@@ -32,7 +33,7 @@ before(async () => {
     import('../src/modules/business.model.js').then((module) => module.default),
     import('../src/modules/business-member.model.js').then((module) => module.default),
   ]);
-  ({ requireAuthentication, requireRole, requireTenant } = await import('../src/auth/middleware.js'));
+  ({ requireAuthentication, requireRole, requireTenant, requirePlatformAdmin } = await import('../src/auth/middleware.js'));
 
   const portServer = http.createServer();
   await new Promise((resolve, reject) => portServer.listen(0, '127.0.0.1', resolve).once('error', reject));
@@ -345,4 +346,72 @@ test('auth configuration allows HTTP origins in development and test', () => {
     NODE_ENV: 'test',
   });
   assert.deepEqual(testConfig.allowedOrigins, ['http://localhost:3000']);
+});
+
+test('requirePlatformAdmin allows only verified super_admin users', async () => {
+  const context = await auth.$context;
+
+  // Create a regular (non-admin) user
+  const regularEmail = `regular-${randomBytes(8).toString('hex')}@example.test`;
+  const regularUser = await context.internalAdapter.createUser(
+    { name: 'Regular User', email: regularEmail, emailVerified: false, status: 'active', platformRole: 'none' },
+    { method: 'email-password' },
+  );
+  await context.internalAdapter.createAccount({
+    accountId: regularUser.id,
+    providerId: 'credential',
+    userId: regularUser.id,
+    password: await context.password.hash(password),
+  });
+
+  // Create a super_admin user
+  const adminEmail = `superadmin-${randomBytes(8).toString('hex')}@example.test`;
+  const adminUser = await context.internalAdapter.createUser(
+    { name: 'Super Admin', email: adminEmail, emailVerified: false, status: 'active', platformRole: 'super_admin' },
+    { method: 'email-password' },
+  );
+  await context.internalAdapter.createAccount({
+    accountId: adminUser.id,
+    providerId: 'credential',
+    userId: adminUser.id,
+    password: await context.password.hash(password),
+  });
+
+  // Login as regular user with unique IP to avoid rate limiting
+  const regularIp = `10.1.0.${Math.floor(Math.random() * 255)}`;
+  const regularLogin = await request('/api/auth/sign-in/email', {
+    method: 'POST',
+    body: JSON.stringify({ email: regularEmail, password }),
+    headers: { 'x-gashisab-client-ip': regularIp },
+  });
+  const regularCookie = cookieFrom(regularLogin);
+  assert.ok(regularCookie, `Regular login failed with status ${regularLogin.status}`);
+
+  // Regular user should be rejected by requirePlatformAdmin
+  const regularResult = await invokeMiddleware(requirePlatformAdmin(auth), { headers: { cookie: regularCookie } });
+  assert.equal(regularResult.statusCode, 403);
+
+  // Login as super admin with unique IP to avoid rate limiting
+  const adminIp = `10.2.0.${Math.floor(Math.random() * 255)}`;
+  const adminLogin = await request('/api/auth/sign-in/email', {
+    method: 'POST',
+    body: JSON.stringify({ email: adminEmail, password }),
+    headers: { 'x-gashisab-client-ip': adminIp },
+  });
+  const adminCookie = cookieFrom(adminLogin);
+  assert.ok(adminCookie);
+
+  // Super admin should pass requirePlatformAdmin
+  const adminResult = await invokeMiddleware(requirePlatformAdmin(auth), { headers: { cookie: adminCookie } });
+  assert.equal(adminResult.nextCalled, true);
+  assert.equal(adminResult.reqAuth.platformRole, 'super_admin');
+
+  // Suspended super admin should be rejected
+  await User.updateOne({ _id: adminUser.id }, { $set: { status: 'suspended' } });
+  const suspendedResult = await invokeMiddleware(requirePlatformAdmin(auth), { headers: { cookie: adminCookie } });
+  assert.equal(suspendedResult.statusCode, 403);
+
+  // Unauthenticated request should be rejected with 401
+  const unauthResult = await invokeMiddleware(requirePlatformAdmin(auth), { headers: {} });
+  assert.equal(unauthResult.statusCode, 401);
 });

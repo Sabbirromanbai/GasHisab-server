@@ -51,3 +51,28 @@ export const requireRole = (...allowedRoles) => {
     return next();
   };
 };
+
+// Platform-level admin guard. Verifies the Better Auth session AND checks the
+// database user's platformRole. This is separate from business roles (owner/
+// admin/staff) which are scoped to a tenant. Only users with platformRole
+// 'super_admin' (set exclusively via the one-time bootstrap script) pass.
+export const requirePlatformAdmin = (auth) => async (req, res, next) => {
+  try {
+    const session = await auth.api.getSession({ headers: fromNodeHeaders(req.headers) });
+    if (!session?.user?.id || !mongoose.isValidObjectId(session.user.id)) {
+      return res.status(401).json({ error: 'Authentication required.' });
+    }
+    // Re-check active status AND platform role against the database on every
+    // request. Session data alone is not trusted for privilege decisions.
+    const user = await User.findOne({
+      _id: session.user.id,
+      status: 'active',
+      platformRole: 'super_admin',
+    }).select('_id').lean();
+    if (!user) return res.status(403).json({ error: 'Platform admin access required.' });
+    req.auth = { userId: String(user._id), platformRole: 'super_admin' };
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+};
