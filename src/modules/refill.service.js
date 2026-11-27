@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto';
 import mongoose from 'mongoose';
+import { inTransaction, generateRequestHash, runIdempotently } from '../kernel/index.js';
 import Business from './business.model.js';
 import BusinessMember from './business-member.model.js';
 import Product from './product.model.js';
@@ -14,60 +14,14 @@ import SupplierPayment from './supplier-payment.model.js';
 import Supplier from './supplier.model.js';
 import RefillReplacementReceipt from './refill-replacement-receipt.model.js';
 
-const TRANSACTION_OPTIONS = {
-  readConcern: { level: 'snapshot' },
-  writeConcern: { w: 'majority' },
-  readPreference: 'primary',
-};
-
 const toId = (value) => new mongoose.Types.ObjectId(value);
 const idString = (value) => String(value);
 const isWholeQuantity = (value) => Number.isSafeInteger(value) && value >= 0;
 const isPoisha = (value) => Number.isSafeInteger(value) && value >= 0;
-const fingerprint = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+const fingerprint = generateRequestHash;
 
 const requireValue = (value, message) => {
   if (value === undefined || value === null || value === '') throw new Error(message);
-};
-
-const inTransaction = async (work) => {
-  // Inventory, batch, receipt, and movement writes must commit or roll back together.
-  const session = await mongoose.startSession();
-  try {
-    let result;
-    await session.withTransaction(async () => {
-      result = await work(session);
-    }, TRANSACTION_OPTIONS);
-    return result;
-  } finally {
-    await session.endSession();
-  }
-};
-
-const runIdempotently = async ({ model, filter, requestHash, authorize, work }) => {
-  await authorize();
-  const findExisting = () => model.findOne(filter).select('+requestHash');
-  const findVisible = () => model.findOne(filter);
-  const existing = await findExisting();
-  if (existing) {
-    if (existing.requestHash !== requestHash) {
-      throw new Error('This idempotency key was already used for a different request.');
-    }
-    return findVisible();
-  }
-
-  try {
-    return await inTransaction(work);
-  } catch (error) {
-    // A concurrent retry can win the unique-index race; return its result only for the same request.
-    if (error.code !== 11000) throw error;
-    const duplicate = await findExisting();
-    if (!duplicate) throw error;
-    if (duplicate.requestHash !== requestHash) {
-      throw new Error('This idempotency key was already used for a different request.', { cause: error });
-    }
-    return findVisible();
-  }
 };
 
 const assertTenantBusiness = async (businessId, session) => {
@@ -85,9 +39,16 @@ const assertSupplier = async (supplierId, businessId, session) => {
   return supplier;
 };
 
-const assertSupplierBrand = (supplier, brand) => {
+// Backward compatible: `target` may be a legacy brand string or a Product.
+// Matches an authorized `brand` string, or an optional `brandId` reference.
+const assertSupplierBrand = (supplier, target) => {
+  const brand = typeof target === 'string' ? target : target?.brand;
+  const brandId = typeof target === 'string' ? undefined : target?.brandId;
   const authorized = supplier.brandAuthorizations.some(
-    (entry) => entry.status === 'active' && entry.brand === brand,
+    (entry) => entry.status === 'active' && (
+      entry.brand === brand ||
+      (brandId && entry.brandId && String(entry.brandId) === String(brandId))
+    ),
   );
   if (!authorized) throw new Error('This supplier is not authorized to refill the requested LPG brand.');
 };
@@ -190,7 +151,7 @@ export const createRefillRate = async ({
       status: 'active',
     }).session(session);
     if (!product) throw new Error('Active product was not found in this business.');
-    assertSupplierBrand(supplier, product.brand);
+    assertSupplierBrand(supplier, product);
 
     const rate = new RefillRate({
       businessId: tenantId,
@@ -275,7 +236,7 @@ export const dispatchRefillBatch = async ({
       const productById = new Map(products.map((product) => [idString(product._id), product]));
       const brandSet = new Set(products.map((product) => product.brand));
       if (brandSet.size !== 1) throw new Error('A refill batch can contain only one registered LPG brand.');
-      assertSupplierBrand(supplier, [...brandSet][0]);
+      assertSupplierBrand(supplier, products[0]);
 
       const snapshots = [];
       for (const requested of requestedItems) {

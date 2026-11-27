@@ -46,6 +46,13 @@ const businessSchema = new mongoose.Schema(
       default: 'active',
       required: true,
     },
+    // Bumped on every membership mutation. Concurrent owner changes write this
+    // same document so MongoDB raises a write conflict instead of letting two
+    // requests both pass the last-owner check and orphan the business.
+    membershipRevision: { type: Number, default: 0, min: 0 },
+    // Optional multi-warehouse mode. Default false = single (implicit default) warehouse; no setup required.
+    // Additive; existing businesses are unaffected. No warehouse-management feature is implemented here.
+    multiWarehouse: { type: Boolean, default: false, required: true },
   },
   { timestamps: true },
 );

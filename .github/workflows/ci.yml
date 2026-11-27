@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  refill-integration:
+  test:
     runs-on: ubuntu-24.04
     steps:
       - name: Check out source
@@ -66,7 +66,10 @@ jobs:
           echo "MongoDB replica set did not become primary in time." >&2
           exit 1
 
-      - name: Run refill and auth integration tests
+      - name: Run all test suites
         env:
+          NODE_ENV: test
           MONGODB_TEST_URI: mongodb://127.0.0.1:27018/gashisab_test?replicaSet=gashisab-rs
-        run: npm run test:refill && npm run test:auth
+        # All suites share one guarded test database. --test-concurrency=1 runs
+        # files serially so the per-file emptiness guard cannot race.
+        run: npm test

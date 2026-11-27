@@ -53,7 +53,7 @@ const refillBatchSchema = new mongoose.Schema(
   {
     businessId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'Supplier',
+      ref: 'Business', // tenant key; refs 'Business', never 'Supplier'
       required: true,
       immutable: true,
     },

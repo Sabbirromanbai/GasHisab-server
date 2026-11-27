@@ -1,19 +1,26 @@
 import cors from 'cors';
 import express from 'express';
 import { toNodeHandler } from 'better-auth/node';
-
-const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+import { toHttpError } from './errors.js';
+import { createBusinessRouter } from './routes/businesses.js';
+import { createCatalogRouter } from './routes/catalog.js';
+import { createInventoryRouter } from './routes/inventory.js';
+import { createPurchaseRouter } from './routes/purchases.js';
+import { createWarehouseRouter } from './routes/warehouses.js';
+import { resolveClientIp } from './security/client-ip.js';
+import { isAllowedUnsafeRequest } from './security/request-origin.js';
 
 export const createApp = ({ auth, config }) => {
   if (!auth || !config) throw new Error('Better Auth and validated configuration are required.');
   const app = express();
   app.disable('x-powered-by');
+  // Trust only the configured number of proxy hops; req.ip is then derived
+  // from the socket plus that trusted chain, never from an arbitrary header.
   if (config.trustedProxyHops > 0) app.set('trust proxy', config.trustedProxyHops);
-  // Set client IP for rate limiting; prefer trusted proxy chain, but respect explicit header for tests.
+  // Always overwrite the rate-limit IP header. A client-supplied value is
+  // untrusted at runtime; only the test environment may pin it for determinism.
   app.use((req, _res, next) => {
-    if (!req.headers['x-gashisab-client-ip']) {
-      req.headers['x-gashisab-client-ip'] = req.ip || req.socket.remoteAddress || '';
-    }
+    req.headers['x-gashisab-client-ip'] = resolveClientIp(req, config);
     next();
   });
   app.use(cors({
@@ -26,11 +33,11 @@ export const createApp = ({ auth, config }) => {
     maxAge: 600,
   }));
   // Production session cookies use SameSite=None so a separately hosted frontend can authenticate.
-  // That removes the browser's same-site CSRF barrier, so unsafe methods from unknown origins are rejected.
+  // That removes the browser's same-site CSRF barrier, so unsafe methods must prove a trusted
+  // browser origin (Origin, then Referer, then Fetch Metadata). Non-browser clients without any
+  // of those headers are allowed because they carry no ambient browser credentials.
   app.use((req, res, next) => {
-    if (SAFE_METHODS.has(req.method)) return next();
-    const origin = req.get('origin');
-    if (!origin || config.allowedOrigins.includes(origin)) return next();
+    if (isAllowedUnsafeRequest(req, config.allowedOrigins)) return next();
     return res.status(403).json({ error: 'Origin not allowed.' });
   });
   // Better Auth must receive the raw request before Express body parsers consume it.
@@ -40,17 +47,25 @@ export const createApp = ({ auth, config }) => {
   });
   app.use(express.json({ limit: '32kb' }));
   app.use(express.urlencoded({ extended: true, limit: '32kb' }));
-  // Mount business routes above this point; the JSON 404 and error handler must stay last.
+  // Business context routes — authenticated, tenant-scoped.
+  app.use('/api/businesses', createBusinessRouter(auth));
+  // Catalog (hybrid shared + tenant-owned Brand/CylinderSize + tenant Product), authenticated & tenant-scoped.
+  app.use('/api/catalog', createCatalogRouter(auth));
+  // Inventory foundation (stock, opening stock, adjustments, reconciliation), tenant-scoped.
+  app.use('/api/inventory', createInventoryRouter(auth));
+  app.use('/api/purchases', createPurchaseRouter(auth));
+  app.use('/api/warehouses', createWarehouseRouter(auth));
+  // Mount additional business routes above this point; the JSON 404 and error handler must stay last.
   app.use((_req, res) => {
     res.status(404).json({ error: 'Not found.' });
   });
   app.use((error, _req, res, next) => {
     if (res.headersSent) return next(error);
-    // Body-parser and validation errors carry a 4xx status; do not report them as server failures.
-    const status = error?.status ?? error?.statusCode;
-    const clientError = Number.isInteger(status) && status >= 400 && status < 500;
-    if (!clientError) console.error(`Unhandled request error (${error?.name ?? 'Error'}).`);
-    res.status(clientError ? status : 500).json({ error: clientError ? 'Invalid request.' : 'Internal server error.' });
+    const { status, body } = toHttpError(error);
+    // Only server failures are unexpected enough to log; never log request bodies
+    // or credentials, and never report a client validation problem as a 500.
+    if (status >= 500) console.error(`Unhandled request error (${error?.name ?? 'Error'}).`);
+    return res.status(status).json(body);
   });
   return app;
 };

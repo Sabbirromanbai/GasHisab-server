@@ -1,6 +1,9 @@
 import mongoose from 'mongoose';
 import { MongoClient } from 'mongodb';
 
+// Every integration suite shares this single guarded database. Run them with
+// `--test-concurrency=1` (the aggregate `npm test` script does) so the
+// per-file emptiness check and cleanup never overlap across files.
 const TEST_DATABASE_NAME = 'gashisab_test';
 const TEST_DATABASE_HOST = '127.0.0.1';
 const TEST_DATABASE_PORT = '27018';

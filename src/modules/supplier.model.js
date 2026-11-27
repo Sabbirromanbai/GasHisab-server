@@ -2,7 +2,8 @@ import mongoose from 'mongoose';
 
 const supplierBrandSchema = new mongoose.Schema(
   {
-    brand: { type: String, required: true, trim: true, lowercase: true, maxlength: 80 },
+    brand: { type: String, required: true, trim: true, lowercase: true, maxlength: 80 }, // legacy string preserved
+    brandId: { type: mongoose.Schema.Types.ObjectId, ref: 'Brand' }, // optional shared-or-owned reference
     status: { type: String, enum: ['active', 'inactive'], default: 'active', required: true },
   },
   { _id: false },
@@ -26,6 +27,7 @@ const supplierSchema = new mongoose.Schema(
 
 supplierSchema.index({ businessId: 1, name: 1 });
 supplierSchema.index({ businessId: 1, 'brandAuthorizations.brand': 1, 'brandAuthorizations.status': 1 });
+supplierSchema.index({ businessId: 1, 'brandAuthorizations.brandId': 1, 'brandAuthorizations.status': 1 });
 
 const Supplier = mongoose.models.Supplier || mongoose.model('Supplier', supplierSchema);
 

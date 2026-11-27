@@ -6,8 +6,9 @@ const refillRateSchema = new mongoose.Schema(
   {
     businessId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'Supplier',
+      ref: 'Business', // tenant key; refs 'Business', never 'Supplier'
       required: true,
+      immutable: true, // append-only rate version; tenant can never change
     },
     supplierId: {
       type: mongoose.Schema.Types.ObjectId,
