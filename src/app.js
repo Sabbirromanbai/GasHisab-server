@@ -6,6 +6,9 @@ import { createBusinessRouter } from './routes/businesses.js';
 import { createCatalogRouter } from './routes/catalog.js';
 import { createInventoryRouter } from './routes/inventory.js';
 import { createPurchaseRouter } from './routes/purchases.js';
+import { createSaleRouter } from './routes/sales.js';
+import { createCustomerRouter } from './routes/customers.js';
+import { createSupplierRouter } from './routes/suppliers.js';
 import { createWarehouseRouter } from './routes/warehouses.js';
 import { resolveClientIp } from './security/client-ip.js';
 import { isAllowedUnsafeRequest } from './security/request-origin.js';
@@ -54,6 +57,9 @@ export const createApp = ({ auth, config }) => {
   // Inventory foundation (stock, opening stock, adjustments, reconciliation), tenant-scoped.
   app.use('/api/inventory', createInventoryRouter(auth));
   app.use('/api/purchases', createPurchaseRouter(auth));
+  app.use('/api/sales', createSaleRouter(auth));
+  app.use('/api/customers', createCustomerRouter(auth));
+  app.use('/api/suppliers', createSupplierRouter(auth));
   app.use('/api/warehouses', createWarehouseRouter(auth));
   // Mount additional business routes above this point; the JSON 404 and error handler must stay last.
   app.use((_req, res) => {

@@ -9,6 +9,7 @@ const saleItemSchema = new mongoose.Schema(
       ref: 'Product',
       required: true,
     },
+    kind: { type: String, enum: ['lpg_cylinder'], default: 'lpg_cylinder', required: true }, // new-cylinder sales only
     // These values are copied from the product so old invoices do not change with the catalog.
     brand: { type: String, required: true, trim: true, maxlength: 80 },
     cylinderSizeKg: {
@@ -53,7 +54,7 @@ const saleItemSchema = new mongoose.Schema(
       },
     },
   },
-  { _id: false },
+  { _id: true }, // line id => `sourceLineId` for append-only stock movements; additive
 );
 
 const saleSchema = new mongoose.Schema(
@@ -62,13 +63,17 @@ const saleSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Business',
       required: true,
+      immutable: true, // a sale can never move tenant
     },
+    // Customer is OPTIONAL. When present, must be owned by `businessId` (re-validated); cross-tenant => not found.
     customerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Customer',
-      required: true,
     },
+    // Manual invoice number; unique per business. Not auto-generated.
     invoiceNumber: { type: String, required: true, trim: true, maxlength: 64 },
+    // Sale date (dealer-entered); `createdAt` remains available. Additive.
+    saleDate: { type: Date, default: Date.now },
     items: {
       type: [saleItemSchema],
       required: true,
@@ -144,12 +149,16 @@ const saleSchema = new mongoose.Schema(
       ref: 'User',
       required: true,
     },
+    // Posting idempotency. `requestHash` hidden. Unique per business. Append-once.
+    idempotencyKey: { type: String, trim: true, maxlength: 120, immutable: true },
+    requestHash: { type: String, immutable: true, select: false },
   },
   { timestamps: true },
 );
 
 // Invoice numbers are unique only inside their business tenant.
 saleSchema.index({ businessId: 1, invoiceNumber: 1 }, { unique: true });
+saleSchema.index({ businessId: 1, idempotencyKey: 1 }, { unique: true, partialFilterExpression: { idempotencyKey: { $exists: true, $type: 'string' } } });
 saleSchema.index({ businessId: 1, customerId: 1, createdAt: -1 });
 saleSchema.index({ businessId: 1, status: 1, createdAt: -1 });
 

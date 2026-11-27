@@ -14,11 +14,14 @@ const supplierSchema = new mongoose.Schema(
     // This is the dealer's tenant-scoped record for an external LPG plant.
     businessId: { type: mongoose.Schema.Types.ObjectId, ref: 'Business', required: true, immutable: true },
     name: { type: String, required: true, trim: true, maxlength: 160 },
+    // `mobile` additive; preserve `contact.phone`. Only `name` required.
+    mobile: { type: String, trim: true, maxlength: 32 },
     contact: {
       phone: { type: String, trim: true, maxlength: 32 },
       email: { type: String, trim: true, lowercase: true, maxlength: 254 },
     },
     address: { type: String, trim: true, maxlength: 500 },
+    notes: { type: String, trim: true, maxlength: 1000 },
     brandAuthorizations: { type: [supplierBrandSchema], default: [] },
     status: { type: String, enum: ['active', 'suspended'], default: 'active', required: true },
   },

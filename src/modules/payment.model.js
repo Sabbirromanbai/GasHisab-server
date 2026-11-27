@@ -6,16 +6,20 @@ const paymentSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Business',
       required: true,
+      immutable: true,
     },
     saleId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Sale',
       required: true,
+      immutable: true,
     },
+    paidAt: { type: Date, immutable: true }, // optional; `createdAt` remains available
+    // Customer optional; when present must match sale customer. Not invented.
     customerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Customer',
-      required: true,
+      immutable: true,
     },
     // Amounts are integer poisha so payment records stay exact.
     amount: {
@@ -32,13 +36,17 @@ const paymentSchema = new mongoose.Schema(
       enum: ['cash', 'bkash', 'nagad', 'bank', 'other'],
       required: true,
     },
-    reference: { type: String, trim: true, maxlength: 120 },
-    note: { type: String, trim: true, maxlength: 1000 },
+    reference: { type: String, trim: true, maxlength: 120, immutable: true },
+    note: { type: String, trim: true, maxlength: 1000, immutable: true },
     receivedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
       required: true,
+      immutable: true,
     },
+    // Payment idempotency. `requestHash` hidden. Unique per business. Append-only.
+    idempotencyKey: { type: String, trim: true, maxlength: 120, immutable: true },
+    requestHash: { type: String, immutable: true, select: false },
   },
   { timestamps: true },
 );
@@ -78,6 +86,8 @@ paymentSchema.pre('bulkWrite', function preventBulkMutation(operations) {
 });
 
 paymentSchema.index({ businessId: 1, saleId: 1, createdAt: 1 });
+// Partial unique on idempotency; historical rows without a key unaffected. Append-only.
+paymentSchema.index({ businessId: 1, idempotencyKey: 1 }, { unique: true, partialFilterExpression: { idempotencyKey: { $exists: true, $type: 'string' } } });
 paymentSchema.index({ businessId: 1, customerId: 1, createdAt: -1 });
 
 const Payment = mongoose.models.Payment || mongoose.model('Payment', paymentSchema);
